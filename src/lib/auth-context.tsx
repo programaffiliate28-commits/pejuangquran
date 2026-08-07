@@ -46,11 +46,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return data as Profile | null;
   }, []);
 
-  // Client-side daily sanksi check: if yesterday had missed slots and we
-  // haven't processed sanksi for yesterday yet, increment hutang_sanksi.
-  // Uses getNow()/todayISODate() so it respects the IS_TESTING date override.
+  // Client-side daily sanksi check: kalau kemarin ada slot (pagi/siang/sore)
+  // yang belum diisi dan belum diproses, tiap slot kosong nambah 1 sanksi
+  // (bukan flat 1 per hari). Uses getNow()/todayISODate() supaya respect
+  // IS_TESTING date override.
   const checkYesterdayMissedLogs = useCallback(async (uid: string) => {
-    const today = todayISODate();
     const yesterday = getNow();
     yesterday.setDate(yesterday.getDate() - 1);
     const yStr = yesterday.toISOString().slice(0, 10);
@@ -58,11 +58,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Already processed for this yesterday?
     const { data: prof } = await supabase
       .from('profiles')
-      .select('last_sanksi_check, hutang_sanksi, total_sanksi, rest_mode')
+      .select('last_sanksi_check, hutang_sanksi, total_sanksi, rest_mode, created_at')
       .eq('id', uid)
       .maybeSingle();
     if (!prof || prof.rest_mode) return;
     if (prof.last_sanksi_check === yStr) return;
+
+    // Akun yang baru dibuat gak boleh kena sanksi untuk tanggal SEBELUM
+    // dia terdaftar (mis. baru daftar hari ini, jangan langsung kena
+    // sanksi "kemarin" cuma karena belum ada log — wajar, akunnya
+    // emang belum ada kemarin).
+    const createdDateStr = (prof.created_at ?? '').slice(0, 10);
+    if (createdDateStr && createdDateStr >= yStr) {
+      await supabase
+        .from('profiles')
+        .update({ last_sanksi_check: yStr, updated_at: new Date().toISOString() })
+        .eq('id', uid);
+      return;
+    }
 
     // Check how many of the 3 required slots were done yesterday
     const { data: yLogs } = await supabase
@@ -73,10 +86,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .eq('is_recovery', false);
 
     const doneSlots = new Set((yLogs ?? []).map((l) => l.prayer_time));
-    const completedCount = ['pagi', 'siang', 'sore'].filter((s) => doneSlots.has(s)).length;
+    // 1 slot kosong = 1 sanksi. Kalau pagi terlewat tapi tetap diisi di hari
+    // yang sama (siang/malam, log_date-nya tetap kemarin), slot itu sudah
+    // masuk doneSlots -> sanksi untuk slot itu batal.
+    const missedSlots = ['pagi', 'siang', 'sore'].filter((s) => !doneSlots.has(s));
 
-    if (completedCount >= 3) {
-      // All 3 slots done — no sanksi, just mark as checked
+    if (missedSlots.length === 0) {
+      // Semua slot terisi kemarin — tidak ada sanksi baru, hanya tandai sudah dicek
       await supabase
         .from('profiles')
         .update({ last_sanksi_check: yStr, updated_at: new Date().toISOString() })
@@ -84,13 +100,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    // Slot kemarin tidak lengkap (kurang dari 3) → +1 sanksi (capped at 3)
-    const newHutang = Math.min(3, (prof.hutang_sanksi ?? 0) + 1);
+    // Tiap slot yang kosong menambah 1 sanksi.
+    // hutang_sanksi (aktif) dibatasi maksimal 3, tapi total_sanksi (riwayat
+    // lifetime) tidak dibatasi supaya datanya tetap akurat.
+    const missedCount = missedSlots.length;
+    const newHutang = Math.min(3, (prof.hutang_sanksi ?? 0) + missedCount);
+    const newTotal = (prof.total_sanksi ?? 0) + missedCount;
     const { error: sanksiErr } = await supabase
       .from('profiles')
       .update({
         hutang_sanksi: newHutang,
-        total_sanksi: (prof.total_sanksi ?? 0) + 1,
+        total_sanksi: newTotal,
         last_sanksi_check: yStr,
         updated_at: new Date().toISOString(),
       })
@@ -99,7 +119,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!sanksiErr) {
       // Optimistic local state update — UI merespons seketika
       setProfile((prev) =>
-        prev ? { ...prev, hutang_sanksi: (prev.hutang_sanksi ?? 0) + 1 } : null
+        prev ? { ...prev, hutang_sanksi: newHutang, total_sanksi: newTotal } : null
       );
     }
   }, [setProfile]);
@@ -212,6 +232,45 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       sub.subscription.unsubscribe();
     };
   }, [loadProfile, checkYesterdayMissedLogs]);
+
+  // Banyak user (terutama di HP) gak pernah bener-bener me-reload halaman —
+  // mereka cuma minimize/pindah app lalu balik lagi, jadi tab-nya cuma
+  // di-resume dari background, BUKAN di-mount ulang. useEffect mount di atas
+  // cuma jalan sekali seumur hidup tab tersebut, sehingga checkYesterdayMissedLogs
+  // gak pernah ke-trigger ulang di hari-hari berikutnya walau user aktif lagi.
+  // Fix: re-jalankan pengecekan setiap kali tab kembali kelihatan/fokus,
+  // dengan throttle biar gak spam request kalau user gonta-ganti tab cepat.
+  useEffect(() => {
+    let lastCheckAt = 0;
+    const MIN_INTERVAL_MS = 60_000; // maksimal sekali per menit
+
+    const recheck = () => {
+      const uid = state.user?.id;
+      if (!uid) return;
+      const now = Date.now();
+      if (now - lastCheckAt < MIN_INTERVAL_MS) return;
+      lastCheckAt = now;
+      (async () => {
+        await checkYesterdayMissedLogs(uid);
+        const p = await loadProfile(uid);
+        if (p) {
+          setState((s) => ({ ...s, profile: p, needsOnboarding: !p.onboarded }));
+        }
+      })();
+    };
+
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') recheck();
+    };
+
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('focus', recheck);
+
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('focus', recheck);
+    };
+  }, [state.user?.id, checkYesterdayMissedLogs, loadProfile]);
 
   const signOut = useCallback(async () => {
     await supabase.auth.signOut();
