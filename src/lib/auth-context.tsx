@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useState, useCallback, type React
 import type { Session, User } from '@supabase/supabase-js';
 import { supabase } from './supabase';
 import type { Profile } from './types';
-import { evaluateStrikes, shouldEnterRestMode, todayISODate, getNow } from './habit';
+import { todayISODate, getNow } from './habit';
 
 interface AuthState {
   session: Session | null;
@@ -131,27 +131,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await checkYesterdayMissedLogs(uid);
     const p = await loadProfile(uid);
     if (p) {
-      // Evaluate strikes on load
-      const { data: logDates } = await supabase
-        .from('tilawah_logs')
-        .select('log_date')
-        .eq('user_id', uid);
-      const dates = (logDates ?? []).map((r) => r.log_date as string);
-      const strikeEval = evaluateStrikes(p, dates);
-      if (strikeEval) {
-        const enterRest = shouldEnterRestMode(strikeEval.strikes);
-        const { error } = await supabase
-          .from('profiles')
-          .update({ strikes: strikeEval.strikes, rest_mode: enterRest, updated_at: new Date().toISOString() })
-          .eq('id', uid);
-        if (!error) {
-          const updated = await loadProfile(uid);
-          if (updated) {
-            setState((s) => ({ ...s, profile: updated, needsOnboarding: !updated.onboarded }));
-            return;
-          }
-        }
-      }
       setState((s) => ({ ...s, profile: p, needsOnboarding: !p.onboarded }));
     }
   }, [state.user, loadProfile, checkYesterdayMissedLogs]);
@@ -174,23 +153,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             needsOnboarding: !p?.onboarded,
           });
           if (p) {
-            // Strike evaluation
-            const { data: logDates } = await supabase
-              .from('tilawah_logs')
-              .select('log_date')
-              .eq('user_id', session.user.id);
-            const dates = (logDates ?? []).map((r) => r.log_date as string);
-            const strikeEval = evaluateStrikes(p, dates);
-            if (strikeEval && mounted) {
-              const enterRest = shouldEnterRestMode(strikeEval.strikes);
-              await supabase
-                .from('profiles')
-                .update({ strikes: strikeEval.strikes, rest_mode: enterRest, updated_at: new Date().toISOString() })
-                .eq('id', session.user.id);
-            }
             // Sanksi check for yesterday's missed logs
             await checkYesterdayMissedLogs(session.user.id);
-            // Final profile reload to reflect any sanksi/strike changes
+            // Final profile reload to reflect any sanksi changes
             const finalProf = await loadProfile(session.user.id);
             if (finalProf && mounted) {
               setState((s) => ({ ...s, profile: finalProf, needsOnboarding: !finalProf.onboarded }));
