@@ -1,0 +1,104 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+html.dark {
+  color-scheme: dark;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overscroll-behavior-y: none;
+}
+
+body {
+  font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+  background-color: #fdf9ee;
+  color: #064e3b;
+}
+
+html.dark body {
+  background-color: #022c22;
+  color: #d1fae5;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(6,95,70,0.2); border-radius: 999px; }
+html.dark ::-webkit-scrollbar-thumb { background: rgba(110,231,183,0.25); }
+
+/* Hide scrollbar but allow scroll */
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* Hide Bolt watermark / "Made in Bolt" badge and any platform overlay */
+#bolt-watermark,
+[id*="bolt-watermark"],
+[class*="bolt-watermark"],
+a[href*="bolt.new"],
+a[href*="stackblitz"],
+iframe[src*="bolt"],
+div[style*="z-index: 99999"],
+div[style*="z-index: 999999"] {
+  display: none !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  visibility: hidden !important;
+}
+
+@layer components {
+  .app-max-width {
+    @apply mx-auto w-full max-w-md;
+  }
+  .card {
+    @apply rounded-3xl bg-white shadow-card dark:bg-emerald-950/60 dark:ring-1 dark:ring-emerald-800/50;
+  }
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-2xl bg-emerald-700 px-5 py-3 text-sm font-semibold text-white shadow-soft transition-all hover:bg-emerald-800 active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100;
+  }
+  .btn-gold {
+    @apply inline-flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-br from-gold-400 to-gold-600 px-5 py-3 text-sm font-bold text-emerald-950 shadow-glow transition-all hover:from-gold-500 hover:to-gold-700 active:scale-[0.98] disabled:opacity-50;
+  }
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-2xl bg-emerald-50 px-5 py-3 text-sm font-semibold text-emerald-800 transition-all hover:bg-emerald-100 active:scale-[0.98] dark:bg-emerald-900/40 dark:text-emerald-200 dark:hover:bg-emerald-900/70;
+  }
+  .input-field {
+    @apply w-full rounded-2xl border border-emerald-200 bg-white px-4 py-3 text-sm text-emerald-950 placeholder-emerald-400 outline-none transition-all focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 dark:border-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-100 dark:placeholder-emerald-600 dark:focus:ring-emerald-800/50;
+  }
+  .badge {
+    @apply inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold;
+  }
+}
+
+/* Shimmer skeleton */
+.shimmer {
+  background: linear-gradient(90deg, rgba(6,95,70,0.05) 25%, rgba(6,95,70,0.12) 37%, rgba(6,95,70,0.05) 63%);
+  background-size: 200% 100%;
+  animation: shimmer 2s linear infinite;
+}
+html.dark .shimmer {
+  background: linear-gradient(90deg, rgba(110,231,183,0.05) 25%, rgba(110,231,183,0.12) 37%, rgba(110,231,183,0.05) 63%);
+  background-size: 200% 100%;
+}
+
+/* Paksa sembunyikan semua elemen tempelan Bolt */
+body > a[href*="bolt.new"],
+body > div[style*="fixed"][style*="bottom"],
+[class*="bolt-watermark"],
+[id*="bolt-watermark"] {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  width: 0 !important;
+  height: 0 !important;
+  overflow: hidden !important;
+}
